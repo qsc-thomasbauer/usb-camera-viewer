@@ -1,0 +1,12 @@
+[project]
+name = "usb-viewer"
+version = "0.1.0"
+description = "Web viewer for USB webcams with automatic recovery"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "pyudev>=0.24",
+]
+
+[tool.uv]
+package = false

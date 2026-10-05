@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #ddd; }
+  header { padding: 10px 16px; display: flex; gap: 12px; align-items: baseline; border-bottom: 1px solid #222; }
+  header h1 { font-size: 16px; margin: 0; }
+  #banner { color: #f77; }
+  #grid { display: grid; gap: 12px; padding: 12px; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  #empty { padding: 40px; text-align: center; color: #777; }
+  .tile { background: #1b1b1b; border: 1px solid #2a2a2a; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
+  .head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; }
+  .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: #444; white-space: nowrap; }
+  .badge.streaming { background: #1e6b34; }
+  .badge.retrying, .badge.resetting { background: #8a5a00; }
+  .badge.disconnected { background: #5a1f1f; }
+  .view { position: relative; background: #000; aspect-ratio: 16 / 9; }
+  .view img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .view .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                   background: rgba(0,0,0,.6); font-size: 16px; text-align: center; padding: 10px; }
+  .tile.live .overlay { display: none; }
+  .meta { padding: 6px 10px; font-size: 12px; color: #999; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .meta .spacer { flex: 1; }
+  button { background: #333; color: #ddd; border: 1px solid #555; border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  details { padding: 0 10px 8px; font-size: 12px; }
+  details summary { color: #e99; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  details pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; color: #caa; }
+</style>
+</head>
+<body>
+<header><h1>USB Viewer</h1><span id="banner"></span></header>
+<div id="grid"></div>
+<div id="empty">No USB cameras detected. Plug one in, and it will appear here automatically.</div>
+<script>
+const grid = document.getElementById('grid');
+const tiles = new Map();
+
+function el(tag, cls, parent) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function connect(t) {
+  clearTimeout(t.retryTimer);
+  t.img.src = `/stream/${encodeURIComponent(t.id)}.mjpg?s=${t.session}&t=${Date.now()}`;
+}
+
+function createTile(c) {
+  const t = { id: c.id, session: null, retryTimer: null };
+  t.el = el('div', 'tile', grid);
+  const head = el('div', 'head', t.el);
+  t.name = el('span', 'name', head);
+  t.badge = el('span', 'badge', head);
+  const view = el('div', 'view', t.el);
+  t.img = el('img', null, view);
+  t.img.alt = '';
+  t.overlay = el('div', 'overlay', view);
+  t.meta = el('div', 'meta', t.el);
+  t.mode = el('span', null, t.meta);
+  t.fps = el('span', null, t.meta);
+  t.counts = el('span', null, t.meta);
+  el('span', 'spacer', t.meta);
+  const reset = el('button', null, t.meta);
+  reset.textContent = 'Reset USB';
+  reset.title = 'Reset this device at the USB level (like replugging it)';
+  reset.onclick = async () => {
+    reset.disabled = true;
+    try { await fetch(`/api/cameras/${encodeURIComponent(t.id)}/reset`, { method: 'POST' }); } catch (e) {}
+    setTimeout(() => reset.disabled = false, 3000);
+  };
+  t.err = el('details', null, t.el);
+  t.errSummary = el('summary', null, t.err);
+  t.errText = el('pre', null, t.err);
+  // A broken stream: try again shortly (the server closes idle streams too).
+  t.img.onerror = () => { t.retryTimer = setTimeout(() => { if (t.live) connect(t); }, 2000); };
+  tiles.set(c.id, t);
+  return t;
+}
+
+function updateTile(t, c) {
+  t.name.textContent = `${c.name || 'USB camera'}  ·  port ${c.key}`;
+  t.name.title = `${c.vidpid || ''} ${c.devnode || ''}`;
+  t.badge.textContent = c.state;
+  t.badge.className = 'badge ' + c.state.replace(/\s+/g, '-');
+  t.live = c.state === 'streaming';
+  t.el.classList.toggle('live', t.live);
+  t.mode.textContent = c.mode || '';
+  t.fps.textContent = c.fps != null ? `${c.fps} fps` : '';
+  t.counts.textContent = `restarts ${c.restarts} · resets ${c.resets}`;
+
+  let overlay = c.state;
+  if (c.state === 'retrying' && c.retry_in != null) overlay += ` in ${c.retry_in}s`;
+  if (c.state === 'disconnected') overlay = 'Disconnected, waiting for the device to come back';
+  t.overlay.textContent = overlay;
+
+  // (Re)connect whenever the camera starts a new capture session.
+  if (t.live && t.session !== c.session) {
+    t.session = c.session;
+    connect(t);
+  }
+
+  t.err.style.display = c.last_error ? '' : 'none';
+  if (c.last_error) {
+    t.errSummary.textContent = `Last error (${c.last_error_age}s ago): ${c.last_error}`;
+    t.errText.textContent = c.last_error;
+  }
+}
+
+async function refresh() {
+  let cams;
+  try {
+    const r = await fetch('/api/cameras', { cache: 'no-store' });
+    cams = await r.json();
+    document.getElementById('banner').textContent = '';
+  } catch (e) {
+    document.getElementById('banner').textContent = 'Server unreachable, retrying…';
+    return;
+  }
+  const seen = new Set();
+  for (const c of cams) {
+    seen.add(c.id);
+    updateTile(tiles.get(c.id) || createTile(c), c);
+  }
+  for (const [id, t] of tiles) {
+    if (!seen.has(id)) { t.img.removeAttribute('src'); t.el.remove(); tiles.delete(id); }
+  }
+  document.getElementById('empty').style.display = tiles.size ? 'none' : '';
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
