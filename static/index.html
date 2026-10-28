@@ -68,6 +68,15 @@ function createTile(c) {
   t.fps = el('span', null, t.meta);
   t.counts = el('span', null, t.meta);
   el('span', 'spacer', t.meta);
+  t.snap = el('button', null, t.meta);
+  t.snap.textContent = 'Snapshot';
+  t.snap.title = 'Download the current frame at full camera resolution';
+  t.snap.onclick = () => {
+    const a = el('a');
+    a.href = `/snapshot/${encodeURIComponent(t.id)}.jpg?download=1&t=${Date.now()}`;
+    a.download = '';
+    a.click();
+  };
   const reset = el('button', null, t.meta);
   reset.textContent = 'Reset USB';
   reset.title = 'Reset this device at the USB level (like replugging it)';
@@ -92,6 +101,7 @@ function updateTile(t, c) {
   t.badge.className = 'badge ' + c.state.replace(/\s+/g, '-');
   t.live = c.state === 'streaming';
   t.el.classList.toggle('live', t.live);
+  t.snap.disabled = !t.live;
   t.mode.textContent = c.mode || '';
   t.fps.textContent = c.fps != null ? `${c.fps} fps` : '';
   t.counts.textContent = `restarts ${c.restarts} · resets ${c.resets}`;

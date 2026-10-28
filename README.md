@@ -50,7 +50,7 @@ changes. Set `PORT=9000 ./install.sh` to use another port.
 
 - `GET /api/cameras`: status of every camera (state, mode, fps, restarts, last error)
 - `GET /stream/<id>.mjpg`: MJPEG stream
-- `GET /snapshot/<id>.jpg`: latest frame
+- `GET /snapshot/<id>.jpg`: latest frame (add `?download=1` to save it as a file)
 - `POST /api/cameras/<id>/reset`: USB reset
 
 Note: browsers allow about 6 connections per host, so one browser tab can show about 5

@@ -6,7 +6,7 @@ import signal
 import sys
 import time
 
-from flask import Flask, Response, abort, jsonify, send_from_directory
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 from discovery import Discovery, Registry
 
@@ -48,7 +48,12 @@ def snapshot(cam_id):
     frame = _camera_or_404(cam_id).frame
     if frame is None:
         abort(503)
-    return Response(frame, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if request.args.get("download"):
+        # The frame is sent byte for byte as the camera delivered it (no re-encoding).
+        name = f"{cam_id}_{time.strftime('%Y%m%d-%H%M%S')}.jpg"
+        headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    return Response(frame, mimetype="image/jpeg", headers=headers)
 
 
 @app.get("/stream/<cam_id>.mjpg")
