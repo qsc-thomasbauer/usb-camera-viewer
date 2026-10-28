@@ -9,6 +9,7 @@ import time
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 from discovery import Discovery, Registry
+from recorder import REC_DIR, Recorder
 
 PORT = int(os.environ.get("PORT", 8080))
 STREAM_IDLE_CLOSE = 10  # end a stream after this long without new frames; the UI reconnects
@@ -18,6 +19,7 @@ log = logging.getLogger("app")
 here = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(here, "static"))
 registry = Registry()
+recorder = Recorder()
 
 
 def _camera_or_404(cam_id):
@@ -34,13 +36,39 @@ def index():
 
 @app.get("/api/cameras")
 def cameras():
-    return jsonify(registry.statuses())
+    return jsonify([{**s, **recorder.status(s["id"])} for s in registry.statuses()])
 
 
 @app.post("/api/cameras/<cam_id>/reset")
 def reset(cam_id):
     _camera_or_404(cam_id).request_reset()
     return jsonify(ok=True)
+
+
+@app.post("/api/cameras/<cam_id>/record/start")
+def record_start(cam_id):
+    try:
+        rec = recorder.start(_camera_or_404(cam_id))
+    except (ValueError, OSError) as e:
+        return jsonify(ok=False, error=str(e)), 409
+    return jsonify(ok=True, file=rec.name)
+
+
+@app.post("/api/cameras/<cam_id>/record/stop")
+def record_stop(cam_id):
+    rec = recorder.stop(cam_id)
+    if rec is None:
+        return jsonify(ok=False, error="not recording"), 409
+    if rec.error:
+        return jsonify(ok=False, error=rec.error), 500
+    return jsonify(ok=True, file=rec.name, url=f"/recordings/{rec.name}")
+
+
+@app.get("/recordings/<name>")
+def recording(name):
+    if not name.endswith(".mp4"):
+        abort(404)
+    return send_from_directory(REC_DIR, name, as_attachment=True)
 
 
 @app.get("/snapshot/<cam_id>.jpg")
@@ -97,6 +125,7 @@ def main():
     finally:
         log.info("shutting down")
         discovery.stop()
+        recorder.stop_all()  # finish the MP4 files before the cameras go away
         registry.stop_all()
 
 

@@ -20,6 +20,13 @@ gets its own supervised `ffmpeg` process:
   mode fails because there isn't enough USB bandwidth (several cameras on one hub), the
   viewer steps down to smaller modes. Cameras without MJPEG are transcoded at 640x480 or
   smaller.
+- **Snapshot:** downloads the current frame exactly as the camera sent it.
+- **Recording:** the "Record" button saves H.264 MP4 video on the Pi (in `recordings/`) and
+  downloads it when you stop. A second ffmpeg encodes the frames the viewer already gets, so
+  the live view keeps running. Each frame keeps its arrival time, so the video plays at real
+  speed. If the encoder can't keep up, frames are skipped. On a Pi, software
+  encoding (libx264) manages about 720p; for 1080p try `REC_ENCODER=h264_v4l2m2m` (hardware).
+  Files are not deleted automatically.
 
 ## Install
 
@@ -45,6 +52,9 @@ changes. Set `PORT=9000 ./install.sh` to use another port.
 | `RESET_MIN_INTERVAL` | 60 | minimum seconds between automatic resets |
 | `BACKOFF_MAX` | 30 | longest wait between retries |
 | `RAW_MAX_PIXELS` | 307200 | size cap for transcoded (non-MJPEG) modes |
+| `REC_DIR` | `recordings/` | where recordings are saved |
+| `REC_ENCODER` | libx264 | ffmpeg H.264 encoder for recordings |
+| `REC_ENCODER_ARGS` | `-preset veryfast -crf 23` | encoder options (`-b:v 4M` for other encoders) |
 
 ## API
 
@@ -52,6 +62,9 @@ changes. Set `PORT=9000 ./install.sh` to use another port.
 - `GET /stream/<id>.mjpg`: MJPEG stream
 - `GET /snapshot/<id>.jpg`: latest frame (add `?download=1` to save it as a file)
 - `POST /api/cameras/<id>/reset`: USB reset
+- `POST /api/cameras/<id>/record/start`, `POST /api/cameras/<id>/record/stop`: start or stop
+  a recording; stop returns the download URL
+- `GET /recordings/<file>.mp4`: download a recording
 
 Note: browsers allow about 6 connections per host, so one browser tab can show about 5
 cameras at once.
